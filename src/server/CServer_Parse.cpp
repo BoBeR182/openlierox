@@ -1654,7 +1654,13 @@ void GameServer::ParseConnect(const SmartPointer<NetworkSocket>& net_socket, CBy
 			newcl->getUdpFileDownloader()->allowFileRequest(false);
 		}
 		newcl->setGameReady(false);
-		
+
+		// A mid-game joiner has none of the synced state yet
+		// (a lobby joiner accumulates it over the lobby frames);
+		// send it now, before PrepareGame, so the client knows the mod (#973).
+		notes << "connect during game: " << newcl->debugName() << ", sending game state then PrepareGame" << endl;
+		SendGameStateUpdates(newcl);
+
 		if(newcl->getClientVersion() <= OLXBetaVersion(0,57,8))
 			// HINT: this is necessary because of beta8 which doesn't update all its state variables from preparegame
 			newcl->getNetEngine()->SendUpdateLobbyGame();

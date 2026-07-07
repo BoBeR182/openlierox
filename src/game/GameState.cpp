@@ -301,7 +301,9 @@ void GameStateUpdates::diffFromStateToCurrent(const GameState& s) {
 	foreach(o, game.gameStateUpdates->objCreations) {
 		if(game.isClient()) continue; // none-at-all right now... worm-creation is handled independently atm
 		if(!o->obj) continue;
-		if(!o->obj.get()->weOwnThis()) continue;
+		// Create any object this client does not have yet.
+		// Was gated on weOwnThis() (== getLocal()), false for a worm owned by
+		// another client, so a client never learned the other clients' worms (#973).
 		if(!s.haveObject(*o))
 			pushObjCreation(*o);
 	}

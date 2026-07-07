@@ -231,6 +231,7 @@ public:
 	void		SendEmptyWeaponsOnRespawn( CWorm * Worm );
 	bool		SendUpdate();
 	void		SendGameStateUpdates();
+	bool		SendGameStateUpdates(CServerConnection* cl); // for one client; returns whether it sent anything
 	void		SendWeapons(CServerConnection* cl = NULL, CWorm* w = NULL); // if NULL, send globally, else only to that client
 	void		SendWormTagged(CWorm *w);
 	void		SendTeamScoreUpdate();
