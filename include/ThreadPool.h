@@ -16,10 +16,8 @@
 #include <string>
 #include <boost/function.hpp>
 #include "util/Result.h"
-
-// Under Win, it's HANDLE (which is void*).
-// Otherwise, it's pthread_t, which is also a ptr-type.
-typedef uintptr_t ThreadId;
+#include "ThreadId.h"
+#include "SmartPointer.h"
 
 struct SDL_mutex;
 struct SDL_cond;
@@ -33,42 +31,47 @@ struct Action {
 	virtual Result handle() = 0;
 };
 
+// The handle returned by ThreadPool::start().
+// It represents one task (one start() call),
+// not the reused worker thread that runs it.
+// It is reference counted (held via SmartPointer),
+// so it stays alive as long as the caller or the running worker holds it,
+// and it can never be freed or reused under the caller.
+// wait() waits on this, so it is always safe, even at shutdown.
 struct ThreadPoolItem {
-	ThreadPool* pool;
-	SDL_Thread* thread;
-	ThreadId nativeThreadId;
 	std::string name;
-	bool working;
 	bool finished;
-	bool headless;
-	SDL_cond* finishedSignal;
-	SDL_cond* readyForNewWork;
 	int ret;
+	ThreadPoolItem() : finished(false), ret(0) {}
 };
+
+// The reused worker thread, internal to the pool. Defined in ThreadPool.cpp.
+struct ThreadWorker;
 
 class ThreadPool {
 private:
 	SDL_mutex* mutex;
 	SDL_cond* awakeThread;
 	SDL_cond* threadStartedWork;
-	SDL_cond* threadStatusChanged;
-	Action* nextAction; bool nextIsHeadless; std::string nextName;
-	ThreadPoolItem* nextData;
+	SDL_cond* threadStatusChanged; // a worker became idle (for waitAll)
+	SDL_cond* taskFinished;        // a task finished (for wait)
+	Action* nextAction; std::string nextName;
+	SmartPointer<ThreadPoolItem> nextTask;
 	bool quitting;
-	std::set<ThreadPoolItem*> availableThreads;
-	std::set<ThreadPoolItem*> usedThreads;
+	int aliveWorkers; // worker threads that have entered threadWrapper and not yet returned
+	std::set<ThreadWorker*> availableThreads;
+	std::set<ThreadWorker*> usedThreads;
 	void prepareNewThread();
 	static int threadWrapper(void* param);
 	SDL_mutex* startMutex;
 public:
 	ThreadPool(unsigned int size = 5);
 	~ThreadPool();
-	
-	ThreadPoolItem* start(ThreadFunc fct, void* param = NULL, const std::string& name = "unknown worker");
-	// WARNING: if you set headless, you cannot use wait() and you should not save the returned ThreadPoolItem*
-	ThreadPoolItem* start(Action* act, const std::string& name = "unknown worker", bool headless = false); // ThreadPool will own and free the Action
-	ThreadPoolItem* start(boost::function<Result()> fct, const std::string& name = "unknown worker", bool headless = false);
-	bool wait(ThreadPoolItem* thread, int* status = NULL);
+
+	SmartPointer<ThreadPoolItem> start(ThreadFunc fct, void* param = NULL, const std::string& name = "unknown worker");
+	SmartPointer<ThreadPoolItem> start(Action* act, const std::string& name = "unknown worker"); // ThreadPool will own and free the Action
+	SmartPointer<ThreadPoolItem> start(boost::function<Result()> fct, const std::string& name = "unknown worker");
+	bool wait(const SmartPointer<ThreadPoolItem>& item, int* status = NULL);
 	bool waitAll();
 	void dumpState(CmdLineIntf& cli) const;
 	void getAllWorkingThreads(std::map<ThreadId, std::string>& threads);
@@ -98,8 +101,8 @@ struct _ThreadFuncWrapper {
 			static Result wrapper(void* obj) {
 				return (((_T*)obj) ->* _func)();
 			}
-			
-			static ThreadPoolItem* startThread(_T* const obj, const std::string& name) {
+
+			static SmartPointer<ThreadPoolItem> startThread(_T* const obj, const std::string& name) {
 				return threadPool->start((ThreadFunc)&wrapper, (void*)obj, name);
 			}
 		};
@@ -110,4 +113,3 @@ _ThreadFuncWrapper<T>::Wrapper<&memberfunc>::startThread(this, name)
 
 
 #endif
-
